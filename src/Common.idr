@@ -190,8 +190,6 @@ dep f = MkIso to from tf ft
             case (dep_from (MkIso to' from' tf' ft') x (to' y)) of
               (x'', y'') => rewrite (ft' y) in Refl
 
--- e.g. (state, char) <-> char
--- or `dec` could be used with this
 depVect : (init: Iso a b) ->
         (step: a -> Iso a b) ->
         Iso (Vect n a) (Vect n b)
@@ -210,3 +208,27 @@ depVect init step = MkIso (to init) (from init) (tf init) (ft init)
   ft : (step : Iso a b) -> (v : Vect n a) -> from step (to step v) = v
   ft i [] = Refl
   ft (MkIso ito ifrom itf ift) (x::xs) = rewrite (ift x) in cong (ft (step x) xs) {f=(::) x}
+
+stateVect : (init: Iso a b) ->
+          (initS: s) ->
+          (step: s -> a -> s) ->
+          (gen: s -> Iso a b) ->
+          Iso (Vect n a) (Vect n b)
+stateVect {s=s} i is step gen = MkIso (to is i) (from is i) (tf is i) (ft is i)
+  where
+  to : s -> Iso a b -> Vect n a -> Vect n b
+  to _ _ [] = []
+  to st iso (x::xs) = appIso iso x :: to (step st x) (gen (step st x)) xs
+  from : s -> Iso a b -> Vect n b -> Vect n a
+  from st iso [] = []
+  from st iso (x::xs) = unappIso iso x :: from (step st (unappIso iso x)) (gen (step st (unappIso iso x))) xs
+  tf : (st : s) -> (iso : Iso a b) -> (v : Vect n b) -> to st iso (from st iso v) = v
+  tf _ _ [] = Refl
+  tf st iso (x::xs) = rewrite (tf (step st (unappIso iso x)) (gen (step st (unappIso iso x))) xs) in
+    case iso of
+      (MkIso ito ifrom itf ift) => cong (itf x) {f=flip (::) xs}
+  ft : (st : s) -> (iso : Iso a b) -> (v : Vect n a) -> from st iso (to st iso v) = v
+  ft _ _ [] = Refl
+  ft st (MkIso ito ifrom itf ift) (x::xs) = rewrite (ift x) in
+     cong (ft (step st x) (gen (step st x)) xs) {f=(::) x}
+
