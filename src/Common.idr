@@ -190,3 +190,23 @@ dep f = MkIso to from tf ft
             case (dep_from (MkIso to' from' tf' ft') x (to' y)) of
               (x'', y'') => rewrite (ft' y) in Refl
 
+-- e.g. (state, char) <-> char
+-- or `dec` could be used with this
+depVect : (init: Iso a b) ->
+        (step: a -> Iso a b) ->
+        Iso (Vect n a) (Vect n b)
+depVect init step = MkIso (to init) (from init) (tf init) (ft init)
+  where
+  to : Iso a b -> Vect n a -> Vect n b
+  to s [] = []
+  to s (x::xs) = appIso s x :: to (step x) xs
+  from : Iso a b -> Vect n b -> Vect n a
+  from s [] = []
+  from s (x::xs) = unappIso s x :: from (step (unappIso s x)) xs
+  tf : (step : Iso a b) -> (v : Vect n b) -> to step (from step v) = v
+  tf i [] = Refl
+  tf i (x::xs) = rewrite (tf (step (unappIso i x)) xs) in case i of
+    (MkIso ito ifrom itf ift) => cong (itf x) {f=flip (::) xs}
+  ft : (step : Iso a b) -> (v : Vect n a) -> from step (to step v) = v
+  ft i [] = Refl
+  ft (MkIso ito ifrom itf ift) (x::xs) = rewrite (ift x) in cong (ft (step x) xs) {f=(::) x}
