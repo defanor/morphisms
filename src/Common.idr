@@ -232,3 +232,49 @@ stateVect {s=s} i is step gen = MkIso (to is i) (from is i) (tf is i) (ft is i)
   ft st (MkIso ito ifrom itf ift) (x::xs) = rewrite (ift x) in
      cong (ft (step st x) (gen (step st x)) xs) {f=(::) x}
 
+
+
+
+
+
+-- examples
+
+xor : Bool -> Bool -> Bool
+xor = (/=)
+
+xorTwice : (x,y : Bool) -> xor x (xor x y) = y
+xorTwice True True = Refl
+xorTwice False False = Refl
+xorTwice False True = Refl
+xorTwice True False = Refl
+
+test : Iso (Vect n Bool) (Vect n Bool)
+test = stateVect idIso False step gen
+  where
+    idIso = (MkIso id id (\x => Refl) (\x => Refl))
+    -- change state when state and value match
+    step True True = False
+    step False False = True
+    step s _ = s
+    -- just xor with state
+    gen s = MkIso (xor s) (xor s) (xorTwice s) (xorTwice s)
+
+-- λΠ> appIso test [True, True, True, True, True, True, True]
+-- [True, True, True, True, True, True, True] : Vect 7 Bool
+-- λΠ> appIso test [False, True, False, True, False, True, False]
+-- [False, False, False, False, False, False, False] : Vect 7 Bool
+-- λΠ> appIso test [False, True, False, False, False, True, False]
+-- [False, False, False, True, True, False, False] : Vect 7 Bool
+
+test2 : Iso (Vect n Bool) (Vect n Bool)
+test2 = stateVect idIso Z step gen
+  where
+    idIso = (MkIso id id (\x => Refl) (\x => Refl))
+    step Z False = Z
+    step (S n) False = n
+    step n True = S n
+    gen s = MkIso (xor (s == 0)) (xor (s == 0)) (xorTwice (s == 0)) (xorTwice (s == 0))
+
+-- λΠ> appIso test2 [True, True, True, False, False, False, False]
+-- [True, True, True, False, False, False, True] : Vect 7 Bool
+
