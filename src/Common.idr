@@ -1,5 +1,6 @@
 import Control.Isomorphism
 
+%default total
 
 -- probably useless
 data Morphism : (a : Type) -> (b : Type) -> (f : a -> b) -> Type where
@@ -100,6 +101,7 @@ eitherSigmaDistribLeft = MkIso to from tf ft
     from (Left (MkSigma x pa)) = MkSigma x (Left pa)
     from (Right (MkSigma x pb)) = MkSigma x (Right pb)
     tf (Left (MkSigma x p)) = Refl
+    tf (Right (MkSigma x p)) = Refl
     ft (MkSigma x (Left pa)) = Refl
     ft (MkSigma x (Right pb)) = Refl
 
@@ -233,11 +235,173 @@ stateVect {s=s} i is step gen = MkIso (to is i) (from is i) (tf is i) (ft is i)
      cong (ft (step st x) (gen (step st x)) xs) {f=(::) x}
 
 
+-- the `many` isomorphism: roughly List a <-> List b, constructed with
+-- a retraction Maybe a < List b which satisfies a couple of simple
+-- and necessary additional restrictions:
+-- 1. (x:a) -> (all (isNothing . r) $ prefixes $ f (Just x) = True)
+-- 2. (l:List b) -> isJust (r l) = True -> (f (r l)) = l
+
+
+snoc : (x : a) -> List a -> List a
+snoc x [] = [x]
+snoc x (y :: xs) = (y :: snoc x xs)
+
+reverse' : List a -> List a
+reverse' [] = []
+reverse' (x :: xs) = (snoc x (reverse' xs))
+
+suffixes : List a -> List (List a)
+suffixes [] = []
+suffixes (x::xs) = xs :: suffixes xs
+
+prefixes : List a -> List (List a)
+prefixes = (map reverse') . suffixes . reverse'
+
+all' : (a -> Bool) -> List a -> Bool
+all' p [] = True
+all' p (x::xs) = p x && all' p xs
+
+data Many : Type -> Type -> Type where
+  Nil : Retraction (Maybe a) (List b) f r ->
+      (l: List b) ->
+      (all' (isNothing . r) $ l :: prefixes l = True) ->
+      Many a b
+  Cons : Retraction (Maybe a) (List b) f r ->
+       (x: Maybe a) ->
+       ((x:a) -> (all' (isNothing . r) $ prefixes $ f (Just x) = True)) ->
+       ((l:List b) -> isJust (r l) = True -> (f (r l)) = l) ->
+       (isJust x = True) ->
+       (isNothing . r $ [] = True) ->
+       Many a b ->
+       Many a b
+
+-- ^ this should be isomorphic to regular lists. informal proof:
+
+-- Firstly, there is a retraction (Maybe a) < (List b), such that for
+-- any l:List b = f x:a, there's no prefixes (counting Nil) of l that
+-- could be read as other `a` values, and hence no ambiguity after
+-- concatenation.
+
+-- Secondly, input that can't be parsed goes into Many's Nil, and any
+-- data that goes into Cons could be restored (another requirement on
+-- the retraction), hence no data from List gets lost.
+
+-- Obviously, no ambiguity in Maybe a -> List a translation, and no
+-- data gets lost on translation into the list. Except for retraction
+-- and proofs, maybe, so not that obviously, but they are kinda fixed.
+
+
+
+-- informal proof of the following definition: at least one of
+-- prefixes gives non-Nothing value, and it's not [], hence there is a
+-- `Just a` value that consumes some input, hence there is `a`, and it
+-- consumes some input (which probably will be a separate lemma)
+manyExtractFirst' : (r : b -> Maybe a) -> (l: List b) -> all' (isNothing . r) l = False -> a
+manyExtractFirst' r [] prf = void $ trueNotFalse prf
+manyExtractFirst' r (x :: xs) prf with (r x)
+  | Nothing = manyExtractFirst' r xs prf
+  | Just x = x
+
+manyExtractFirst : (r : List b -> Maybe a) ->
+                 (l: List b) ->
+                 (all' (isNothing . r) $ l :: prefixes l = False) ->
+                 (isNothing . r $ [] = True) ->
+                 a
+manyExtractFirst r l p n = manyExtractFirst' r (l :: prefixes l) p
+
+many : Retraction (Maybe a) (List b) f r ->
+     (isNothing . r $ []) = True ->
+     ((x:a) -> (all' (isNothing . r) $ prefixes $ f (Just x) = True)) ->
+     ((l:List b) -> isJust (r l) = True -> (f (r l)) = l) ->
+     Iso (Many a b) (List b)
+many {a=a} {b=b} (MkRetraction f r v) p p2 p3  = MkIso to from tf ft
+  where
+  to : Many a b -> List b
+  to (Nil r l s) = l
+  to (Cons (MkRetraction f r g) x z z' w n s) = f x ++ to s
+  from : List b -> Many a b
+  from l = case (inspect $ all' (isNothing . r) $ l :: prefixes l) of
+    (match True {eq=eq}) => Nil (MkRetraction f r v) l eq
+    (match False {eq=eq}) =>
+           Cons (MkRetraction f r v)
+                (Just (manyExtractFirst r l eq p))
+                p2
+                p3
+                Refl
+                p
+                (from (assert_smaller l (drop (length (f (Just (manyExtractFirst r l eq p)))) l)))
+  tf x = ?mvtf
+  ft x = ?mvft
 
 
 
 
 -- examples
+
+data Foo = Zero | One | End
+
+bcto' : List Bool -> List Foo
+bcto' [] = [End]
+bcto' (False::xs) = Zero :: bcto' xs
+bcto' (True::xs) = One :: bcto' xs
+
+bcto : Maybe (List Bool) -> List Foo
+bcto Nothing = []
+bcto (Just l) = bcto' l
+
+bcfrom : List Foo -> Maybe (List Bool)
+bcfrom (Zero::xs) = do
+  rest <- bcfrom xs
+  Just (False :: rest)
+bcfrom (One::xs) = do
+  rest <- bcfrom xs
+  Just (True :: rest)
+bcfrom [End] = Just []
+bcfrom _ = Nothing
+
+boolFoo : Retraction (Maybe (List Bool)) (List Foo) bcto bcfrom
+boolFoo = MkRetraction bcto bcfrom v
+  where
+    v' : (l: List Bool) -> bcfrom (bcto' l) = Just l
+    v' [] = Refl
+    v' (False :: xs) = rewrite (v' xs) in Refl
+    v' (True :: xs) = rewrite (v' xs) in Refl
+    v : (l: Maybe (List Bool)) -> bcfrom (bcto l) = l
+    v Nothing = Refl
+    v (Just l) = v' l
+
+bc1 : (x: List Bool) -> (all' (isNothing . bcfrom) $ prefixes $ bcto (Just x) = True)
+bc1 l = believe_me ()
+
+bc2 : (l:List Foo) -> isJust (bcfrom l) = True -> (bcto (bcfrom l)) = l
+bc2 [] p = Refl
+bc2 (Zero :: xs) p = believe_me ()
+bc2 (One :: xs) p = believe_me ()
+bc2 (End :: []) p = Refl
+bc2 (End :: (x :: xs)) p = void $ trueNotFalse (sym p)
+
+lfNil : Many (List Bool) Foo
+lfNil = Nil boolFoo [] Refl
+
+lfCons : List Bool -> Many (List Bool) Foo -> Many (List Bool) Foo
+lfCons l m = Cons boolFoo (Just l) bc1 bc2 Refl Refl m
+
+lfMany : Iso (Many (List Bool) Foo) (List Foo)
+lfMany = many boolFoo Refl bc1 bc2
+
+lfTest : Many (List Bool) Foo
+lfTest =
+       lfCons [True, False, True, True] $
+              lfCons [True, True] $
+                     lfCons [False, False] $
+                            lfNil
+
+-- λΠ> appIso lfMany lfTest
+-- [One, Zero, One, One, End, One, One, End, Zero, Zero, End] : List Foo
+-- λΠ> appIso lfMany $ unappIso lfMany [One, Zero, One, One, End, One, One, End, Zero, Zero]
+-- [One, Zero, One, One, End, One, One, End, Zero, Zero] : List Foo
+
+
 
 xor : Bool -> Bool -> Bool
 xor = (/=)
